@@ -286,8 +286,8 @@ export default function App() {
     <div className="min-h-screen font-sans bg-[var(--color-bg)] flex flex-col pb-24 lg:pb-6">
       {/* Header */}
       <div className="bg-[var(--color-bg)]/90 backdrop-blur-md border-b border-[var(--color-border)] py-3 px-6 sticky top-0 z-20">
-        <div className="flex items-center justify-center lg:justify-start gap-2">
-          <Calculator className="text-[var(--color-primary)]" size={22} />
+        <div className="flex items-center justify-center lg:justify-start gap-2.5">
+          <img src="/logo.png" alt="Cuibo Logo" className="w-10 h-10 rounded-xl shadow-sm object-cover bg-white" />
           <h1 className="text-xl font-bold tracking-tight">Cuibo報價工具</h1>
         </div>
       </div>
