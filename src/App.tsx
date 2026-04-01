@@ -10,7 +10,7 @@ const iconMap: Record<string, React.ReactNode> = {
   ccFee: <CreditCard size={16} className="opacity-60" />,
   sourcingFee: <ShoppingCart size={16} className="opacity-60" />,
   shippingRate: <Plane size={16} className="opacity-60" />,
-  domesticJpy: <Truck size={16} className="opacity-60" />,
+  domesticFee: <Truck size={16} className="opacity-60" />,
   platformFee: <Store size={16} className="opacity-60" />,
   taxRate: <Landmark size={16} className="opacity-60" />,
   memberBuffer: <Users size={16} className="opacity-60" />
@@ -31,7 +31,7 @@ type Config = {
   ccFee: ConfigItem;
   sourcingFee: ConfigItem;
   shippingRate: ConfigItem;
-  domesticJpy: ConfigItem;
+  domesticFee: ConfigItem;
   platformFee: ConfigItem;
   taxRate: ConfigItem;
   memberBuffer: ConfigItem;
@@ -43,7 +43,7 @@ type Result = {
   ccFeeTwd: number;
   shippingTwd: number;
   sourcingFeeTwd: number;
-  sourcingFeeJpy: number;
+  sourcingFeeLocal: number;
   domesticTwd: number;
   totalCost: number;
   profit: number;
@@ -67,18 +67,25 @@ const IosToggle = ({ checked, onChange }: { checked: boolean; onChange: (val: bo
 );
 
 export default function App() {
-  const [jpyPrice, setJpyPrice] = useState<string>('');
+  const searchParams = new URLSearchParams(window.location.search);
+  const defaultCountry = (searchParams.get('country') === 'KR' ? 'KR' : 'JP') as 'JP' | 'KR';
+  const defaultMode = (searchParams.get('mode') === 'helper' ? 'helper' : 'boss') as 'boss' | 'helper';
+
+  const [price, setPrice] = useState<string>('');
   const [weight, setWeight] = useState<string>('');
   const [bankRate, setBankRate] = useState<string>('0.215');
   const [isFetchingRate, setIsFetchingRate] = useState(false);
   const [lastRateUpdate, setLastRateUpdate] = useState<string>('');
   
+  const [country, setCountry] = useState<'JP' | 'KR'>(defaultCountry);
+  const [mode, setMode] = useState<'boss' | 'helper'>(defaultMode);
+  
   const [config, setConfig] = useState<Config>({
-    rateMarkup: { label: '匯率加碼緩衝', value: 0.02, enabled: true, unit: '', step: '0.001', group: 'cost' },
+    rateMarkup: { label: '匯率加碼緩衝', value: 0.01, enabled: true, unit: '', step: '0.001', group: 'cost' },
     ccFee: { label: '國外刷卡費', value: 1.5, enabled: true, unit: '%', step: '0.1', group: 'cost' },
     sourcingFee: { label: '代購費比例', value: 10, enabled: true, unit: '%', step: '1', group: 'cost' },
-    shippingRate: { label: '國際空運費', value: 0.252, enabled: true, unit: 'TWD/g', step: '0.001', group: 'cost' },
-    domesticJpy: { label: '日本境內運費', value: 150, enabled: true, unit: 'JPY', step: '10', group: 'cost' },
+    shippingRate: { label: '國際空運費', value: 0.25, enabled: true, unit: 'TWD/g', step: '0.001', group: 'cost' },
+    domesticFee: { label: '境內運費', value: 150, enabled: true, unit: 'JPY', step: '10', group: 'cost' },
     
     platformFee: { label: '平台刷卡抽成', value: 3, enabled: true, unit: '%', step: '1', group: 'divisor' },
     taxRate: { label: '營業稅 (法規)', value: 5, enabled: true, unit: '%', step: '1', group: 'divisor' },
@@ -87,9 +94,33 @@ export default function App() {
 
   const [result, setResult] = useState<Result | null>(null);
 
-  const isBossMode = !config.sourcingFee.enabled && !config.shippingRate.enabled && !config.domesticJpy.enabled;
+  const isBossMode = !config.sourcingFee.enabled && !config.shippingRate.enabled && !config.domesticFee.enabled;
 
-  const fetchExchangeRate = async () => {
+  // Effect to handle country switch
+  useEffect(() => {
+    if (country === 'JP') {
+      setBankRate('0.215');
+      setConfig(prev => ({
+        ...prev,
+        rateMarkup: { ...prev.rateMarkup, value: 0.01 },
+        sourcingFee: { ...prev.sourcingFee, value: 10 },
+        shippingRate: { ...prev.shippingRate, value: 0.25 },
+        domesticFee: { ...prev.domesticFee, value: 150, unit: 'JPY' }
+      }));
+    } else {
+      setBankRate('0.024');
+      setConfig(prev => ({
+        ...prev,
+        rateMarkup: { ...prev.rateMarkup, value: 0.001 },
+        sourcingFee: { ...prev.sourcingFee, value: 5 },
+        shippingRate: { ...prev.shippingRate, value: 0.2 },
+        domesticFee: { ...prev.domesticFee, value: 0, unit: 'KRW' }
+      }));
+    }
+    fetchExchangeRate(country);
+  }, [country]);
+
+  const fetchExchangeRate = async (targetCountry = country) => {
     setIsFetchingRate(true);
     try {
       const targetUrl = 'https://rate.bot.com.tw/xrt?Lang=zh-TW';
@@ -123,24 +154,25 @@ export default function App() {
       const doc = parser.parseFromString(htmlContent, 'text/html');
       const rows = doc.querySelectorAll('table tbody tr');
       
-      let jpyRate = null;
+      let rate = null;
+      const targetCurrency = targetCountry === 'JP' ? 'JPY' : 'KRW';
       for (const row of rows) {
         const currencyText = row.querySelector('.hidden-phone.print_show')?.textContent || '';
-        if (currencyText.includes('JPY')) {
+        if (currencyText.includes(targetCurrency)) {
           const sellTd = row.querySelector('td[data-table="本行現金賣出"]');
           if (sellTd) {
-            jpyRate = parseFloat(sellTd.textContent.trim());
+            rate = parseFloat(sellTd.textContent.trim());
             break;
           }
         }
       }
       
-      if (jpyRate && !isNaN(jpyRate)) {
-        setBankRate(jpyRate.toFixed(4));
+      if (rate && !isNaN(rate)) {
+        setBankRate(rate.toFixed(4));
         const now = new Date();
         setLastRateUpdate(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
       } else {
-        throw new Error('Could not parse JPY rate from Bank of Taiwan');
+        throw new Error(`Could not parse ${targetCurrency} rate from Bank of Taiwan`);
       }
     } catch (error) {
       console.error('Failed to fetch exchange rate:', error);
@@ -148,10 +180,6 @@ export default function App() {
       setIsFetchingRate(false);
     }
   };
-
-  useEffect(() => {
-    fetchExchangeRate();
-  }, []);
 
   const updateConfig = (key: keyof Config, field: keyof ConfigItem, val: any) => {
     setConfig(prev => ({ ...prev, [key]: { ...prev[key], [field]: val } }));
@@ -163,15 +191,15 @@ export default function App() {
       ...prev,
       sourcingFee: { ...prev.sourcingFee, enabled: !isBoss },
       shippingRate: { ...prev.shippingRate, enabled: !isBoss },
-      domesticJpy: { ...prev.domesticJpy, enabled: !isBoss }
+      domesticFee: { ...prev.domesticFee, enabled: !isBoss }
     }));
   };
 
   useEffect(() => {
-    const numJpy = parseFloat(jpyPrice) || 0;
+    const numPrice = parseFloat(price) || 0;
     const numWeight = parseFloat(weight) || 0;
 
-    if (numJpy <= 0) {
+    if (numPrice <= 0) {
       setResult(null);
       return;
     }
@@ -180,22 +208,24 @@ export default function App() {
     const rateMarkup = config.rateMarkup.enabled ? config.rateMarkup.value : 0;
     const finalRate = currentRate + rateMarkup;
     
-    const pureItemTwd = numJpy * finalRate;
+    const pureItemTwd = numPrice * finalRate;
     
-    const domesticJpy = config.domesticJpy.enabled ? config.domesticJpy.value : 0;
-    const domesticTwd = domesticJpy * finalRate;
+    const domesticFee = config.domesticFee.enabled ? config.domesticFee.value : 0;
+    const domesticTwd = domesticFee * finalRate;
 
     const ccFeeRate = config.ccFee.enabled ? (config.ccFee.value / 100) : 0;
-    // 信用卡手續費：(商品原價 + 日本境內運費) * 費率
-    const ccFeeTwd = (pureItemTwd + domesticTwd) * ccFeeRate;
+    const baseForCcTwd = country === 'KR' ? pureItemTwd : (pureItemTwd + domesticTwd);
+    const ccFeeTwd = baseForCcTwd * ccFeeRate;
     
-    const shippingRate = config.shippingRate.enabled ? config.shippingRate.value : 0;
-    const shippingTwd = numWeight * shippingRate;
+    let shippingTwd = 0;
+    if (config.shippingRate.enabled) {
+      shippingTwd = numWeight * config.shippingRate.value;
+    }
     
     const sourcingFeeRate = config.sourcingFee.enabled ? (config.sourcingFee.value / 100) : 0;
-    // 代購費：(商品原價 + 日本境內運費) * 比例
-    const sourcingFeeJpy = Math.round((numJpy + domesticJpy) * sourcingFeeRate);
-    const sourcingFeeTwd = sourcingFeeJpy * finalRate;
+    const baseForSourcing = country === 'KR' ? numPrice : (numPrice + domesticFee);
+    const sourcingFeeLocal = Math.round(baseForSourcing * sourcingFeeRate);
+    const sourcingFeeTwd = sourcingFeeLocal * finalRate;
 
     const totalCost = pureItemTwd + ccFeeTwd + shippingTwd + sourcingFeeTwd + domesticTwd;
 
@@ -238,7 +268,7 @@ export default function App() {
       ccFeeTwd: Math.round(ccFeeTwd),
       shippingTwd: Math.round(shippingTwd),
       sourcingFeeTwd: Math.round(sourcingFeeTwd),
-      sourcingFeeJpy,
+      sourcingFeeLocal,
       domesticTwd: Math.round(domesticTwd),
       totalCost: Math.round(totalCost),
       profit: Math.round(profit),
@@ -250,7 +280,7 @@ export default function App() {
         buffer: Math.round(bufferAmount)
       }
     });
-  }, [jpyPrice, weight, bankRate, config]);
+  }, [price, weight, bankRate, config]);
 
   const renderConfigGroup = (groupName: 'cost' | 'divisor') => {
     const groupItems = (Object.entries(config) as [keyof Config, ConfigItem][]).filter(([_, item]) => item.group === groupName);
@@ -286,17 +316,31 @@ export default function App() {
     <div className="min-h-screen font-sans bg-[var(--color-bg)] flex flex-col pb-24 lg:pb-6">
       {/* Header */}
       <div className="bg-[var(--color-bg)]/90 backdrop-blur-md border-b border-[var(--color-border)] py-3 px-6 sticky top-0 z-20">
-        <div className="flex items-center justify-center lg:justify-start gap-2.5">
-          <img src="/logo.png" alt="Cuibo Logo" className="w-10 h-10 rounded-xl shadow-sm object-cover bg-white" />
-          <h1 className="text-xl font-bold tracking-tight">Cuibo報價工具</h1>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center justify-center lg:justify-start gap-2.5">
+            <img src="/logo.png" alt="Cuibo Logo" className="w-10 h-10 rounded-xl shadow-sm object-cover bg-white" />
+            <h1 className="text-xl font-bold tracking-tight">Cuibo報價工具</h1>
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Country Toggle */}
+            <div className="flex bg-[var(--color-border)] rounded-lg p-1">
+              <button onClick={() => setCountry('JP')} className={`px-3 py-1.5 text-sm rounded-md font-bold transition-colors ${country === 'JP' ? 'bg-white shadow-sm text-[var(--color-primary)]' : 'text-gray-500'}`}>🇯🇵 日本</button>
+              <button onClick={() => setCountry('KR')} className={`px-3 py-1.5 text-sm rounded-md font-bold transition-colors ${country === 'KR' ? 'bg-white shadow-sm text-[var(--color-primary)]' : 'text-gray-500'}`}>🇰🇷 韓國</button>
+            </div>
+            {/* Mode Toggle */}
+            <div className="flex bg-[var(--color-border)] rounded-lg p-1">
+              <button onClick={() => setMode('boss')} className={`px-3 py-1.5 text-sm rounded-md font-bold transition-colors ${mode === 'boss' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-gray-500'}`}>老闆</button>
+              <button onClick={() => setMode('helper')} className={`px-3 py-1.5 text-sm rounded-md font-bold transition-colors ${mode === 'helper' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-gray-500'}`}>小幫手</button>
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="flex-1 w-full max-w-6xl mx-auto p-4 lg:p-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className={`grid grid-cols-1 ${mode === 'boss' ? 'lg:grid-cols-12' : 'max-w-md mx-auto'} gap-6 items-start`}>
           
           {/* Left Column */}
-          <div className="lg:col-span-7 space-y-5">
+          <div className={`${mode === 'boss' ? 'lg:col-span-7' : 'col-span-1'} space-y-5`}>
             {/* Base Inputs */}
             <section>
               <div className="flex items-center gap-1.5 uppercase text-xs font-semibold opacity-70 mb-2 pl-1 tracking-wider">
@@ -306,11 +350,11 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div className="bg-[var(--color-bg)] rounded-xl p-3 border border-[var(--color-border)]">
                     <label className="text-[12px] opacity-70 flex items-center gap-1 mb-1 font-medium">
-                      <Banknote size={14} /> 商品原價 (JPY)
+                      <Banknote size={14} /> 商品原價 ({country === 'JP' ? 'JPY' : 'KRW'})
                     </label>
                     <input 
-                      type="number" inputMode="decimal" value={jpyPrice} 
-                      onChange={(e) => setJpyPrice(e.target.value)} 
+                      type="number" inputMode="decimal" value={price} 
+                      onChange={(e) => setPrice(e.target.value)} 
                       className="w-full bg-transparent text-2xl font-bold focus:outline-none text-[var(--color-text)]" placeholder="0"
                     />
                   </div>
@@ -323,73 +367,95 @@ export default function App() {
                       onChange={(e) => setWeight(e.target.value)} 
                       className="w-full bg-transparent text-2xl font-bold focus:outline-none text-[var(--color-text)]" placeholder="0"
                     />
+                    {country === 'KR' && (
+                      <div className="text-[10px] opacity-60 mt-1 leading-tight">
+                        *材積過大或超過90cm請依規定輸入計費重量 (如3號箱填20000g)
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="bg-[var(--color-primary)]/10 rounded-xl p-3 border border-[var(--color-primary)]/20 flex justify-between items-center">
-                  <div>
-                    <label className="text-[13px] font-bold text-[var(--color-primary)] block">日幣現金賣出</label>
-                    <span className="text-[11px] opacity-60 text-[var(--color-primary)]">{lastRateUpdate ? `最後更新: ${lastRateUpdate}` : '載入中...'}</span>
+                {mode === 'boss' && (
+                  <div className="bg-[var(--color-primary)]/10 rounded-xl p-3 border border-[var(--color-primary)]/20 flex justify-between items-center">
+                    <div>
+                      <label className="text-[13px] font-bold text-[var(--color-primary)] block">{country === 'JP' ? '日幣' : '韓元'}現金賣出</label>
+                      <span className="text-[11px] opacity-60 text-[var(--color-primary)]">{lastRateUpdate ? `最後更新: ${lastRateUpdate}` : '載入中...'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="number" inputMode="decimal" step="0.0001" value={bankRate} 
+                        onChange={(e) => setBankRate(e.target.value)} 
+                        className="w-24 bg-transparent text-right text-xl font-bold focus:outline-none text-[var(--color-primary)]" 
+                      />
+                      <button 
+                        onClick={() => fetchExchangeRate()}
+                        disabled={isFetchingRate}
+                        className={`p-2 rounded-full bg-[var(--color-primary)]/20 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/30 transition-colors ${isFetchingRate ? 'opacity-50' : ''}`}
+                        title="更新匯率"
+                      >
+                        <RefreshCw size={18} className={isFetchingRate ? 'animate-spin' : ''} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="number" inputMode="decimal" step="0.0001" value={bankRate} 
-                      onChange={(e) => setBankRate(e.target.value)} 
-                      className="w-24 bg-transparent text-right text-xl font-bold focus:outline-none text-[var(--color-primary)]" 
-                    />
+                )}
+              </div>
+            </section>
+
+            {/* Helper Mode Result View */}
+            {mode === 'helper' && result && (
+              <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="card bg-[var(--color-primary)] text-white p-6 flex flex-col items-center justify-center shadow-lg shadow-[var(--color-primary)]/20">
+                  <div className="text-sm font-medium opacity-80 mb-1">最終報價 (TWD)</div>
+                  <div className="text-5xl font-black tracking-tight">${result.finalPrice}</div>
+                </div>
+              </section>
+            )}
+
+            {/* Cost Configs (Hidden in Helper Mode) */}
+            {mode === 'boss' && (
+              <>
+                <section>
+                  <div className="flex justify-between items-end mb-2 pl-1">
+                    <div className="flex items-center gap-1.5 uppercase text-xs font-semibold opacity-70 tracking-wider">
+                      <Settings size={14} /> 採購方案與成本控制
+                    </div>
+                  </div>
+                  <div className="bg-[var(--color-border)] p-1 rounded-lg mb-3 flex">
                     <button 
-                      onClick={fetchExchangeRate}
-                      disabled={isFetchingRate}
-                      className={`p-2 rounded-full bg-[var(--color-primary)]/20 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/30 transition-colors ${isFetchingRate ? 'opacity-50' : ''}`}
-                      title="更新匯率"
+                      onClick={() => applyPreset('standard')} 
+                      className={`flex-1 py-1.5 text-[13px] font-bold rounded-md transition-all ${!isBossMode ? 'bg-[var(--color-card)] shadow-sm text-[var(--color-text)]' : 'opacity-60 hover:opacity-100'}`}
                     >
-                      <RefreshCw size={18} className={isFetchingRate ? 'animate-spin' : ''} />
+                      方案 A (標準空運)
+                    </button>
+                    <button 
+                      onClick={() => applyPreset('boss')} 
+                      className={`flex-1 py-1.5 text-[13px] font-bold rounded-md transition-all ${isBossMode ? 'bg-[var(--color-card)] shadow-sm text-[var(--color-text)]' : 'opacity-60 hover:opacity-100'}`}
+                    >
+                      方案 B (老闆帶回)
                     </button>
                   </div>
-                </div>
-              </div>
-            </section>
+                  {renderConfigGroup('cost')}
+                </section>
 
-            {/* Cost Configs */}
-            <section>
-              <div className="flex justify-between items-end mb-2 pl-1">
-                <div className="flex items-center gap-1.5 uppercase text-xs font-semibold opacity-70 tracking-wider">
-                  <Settings size={14} /> 採購方案與成本控制
-                </div>
-              </div>
-              <div className="bg-[var(--color-border)] p-1 rounded-lg mb-3 flex">
-                <button 
-                  onClick={() => applyPreset('standard')} 
-                  className={`flex-1 py-1.5 text-[13px] font-bold rounded-md transition-all ${!isBossMode ? 'bg-[var(--color-card)] shadow-sm text-[var(--color-text)]' : 'opacity-60 hover:opacity-100'}`}
-                >
-                  方案 A (標準空運)
-                </button>
-                <button 
-                  onClick={() => applyPreset('boss')} 
-                  className={`flex-1 py-1.5 text-[13px] font-bold rounded-md transition-all ${isBossMode ? 'bg-[var(--color-card)] shadow-sm text-[var(--color-text)]' : 'opacity-60 hover:opacity-100'}`}
-                >
-                  方案 B (老闆帶回)
-                </button>
-              </div>
-              {renderConfigGroup('cost')}
-            </section>
-
-            {/* Divisor Configs */}
-            <section>
-              <div className="flex items-center gap-1.5 uppercase text-xs font-semibold opacity-70 mb-2 pl-1 tracking-wider">
-                <Shield size={14} /> 逆算除數設定 (隱含成本防禦)
-              </div>
-              {renderConfigGroup('divisor')}
-              <p className="text-[11px] opacity-50 mt-2 px-1 leading-relaxed">
-                系統自動判定：售價低於 400 不計入會員緩衝 (除數 0.92)；高於 400 啟動完整防禦 (除數 0.89)。
-              </p>
-            </section>
+                {/* Divisor Configs */}
+                <section>
+                  <div className="flex items-center gap-1.5 uppercase text-xs font-semibold opacity-70 mb-2 pl-1 tracking-wider">
+                    <Shield size={14} /> 逆算除數設定 (隱含成本防禦)
+                  </div>
+                  {renderConfigGroup('divisor')}
+                  <p className="text-[11px] opacity-50 mt-2 px-1 leading-relaxed">
+                    系統自動判定：售價低於 400 不計入會員緩衝 (除數 0.92)；高於 400 啟動完整防禦 (除數 0.89)。
+                  </p>
+                </section>
+              </>
+            )}
           </div>
 
-          {/* Right Column */}
-          <div className="lg:col-span-5 space-y-5 lg:sticky lg:top-20">
-            {result ? (
-              <>
-                {/* Desktop Result Summary */}
+          {/* Right Column (Hidden in Helper Mode) */}
+          {mode === 'boss' && (
+            <div className="lg:col-span-5 space-y-5 lg:sticky lg:top-20">
+              {result ? (
+                <>
+                  {/* Desktop Result Summary */}
                 <div className="hidden lg:block card p-6 bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-primary)]/5 border-[var(--color-primary)]/30">
                   <div className="flex justify-between items-end mb-4">
                     <div>
@@ -413,13 +479,13 @@ export default function App() {
                   <div className="card p-5 text-[14px] space-y-3">
                     {/* 成本區塊 */}
                     <div className="flex justify-between opacity-80">
-                      <span>商品換算 <span className="text-[11px] opacity-70">({jpyPrice || 0} JPY)</span></span>
+                      <span>商品換算 <span className="text-[11px] opacity-70">({price || 0} {country === 'JP' ? 'JPY' : 'KRW'})</span></span>
                       <span className="font-medium">${result.pureItemTwd}</span>
                     </div>
                     {config.ccFee.enabled && <div className="flex justify-between opacity-80"><span>信用卡費 <span className="text-[11px]">({config.ccFee.value}%)</span></span><span className="font-medium">${result.ccFeeTwd}</span></div>}
                     {config.shippingRate.enabled && <div className="flex justify-between opacity-80"><span>國際運費 <span className="text-[11px]">({weight || 0}g)</span></span><span className="font-medium">${result.shippingTwd}</span></div>}
-                    {config.sourcingFee.enabled && <div className="flex justify-between opacity-80"><span>代購服務費 <span className="text-[11px]">({result.sourcingFeeJpy} JPY)</span></span><span className="font-medium">${result.sourcingFeeTwd}</span></div>}
-                    {config.domesticJpy.enabled && <div className="flex justify-between opacity-80"><span>境內運費 <span className="text-[11px]">({config.domesticJpy.value} JPY)</span></span><span className="font-medium">${result.domesticTwd}</span></div>}
+                    {config.sourcingFee.enabled && <div className="flex justify-between opacity-80"><span>代購服務費 <span className="text-[11px]">({result.sourcingFeeLocal} {country === 'JP' ? 'JPY' : 'KRW'})</span></span><span className="font-medium">${result.sourcingFeeTwd}</span></div>}
+                    {config.domesticFee.enabled && <div className="flex justify-between opacity-80"><span>境內運費 <span className="text-[11px]">({config.domesticFee.value} {country === 'JP' ? 'JPY' : 'KRW'})</span></span><span className="font-medium">${result.domesticTwd}</span></div>}
                     
                     <div className="border-t border-[var(--color-border)] pt-3 mt-1 flex justify-between font-bold text-[15px]">
                       <span>基礎總成本加總</span>
@@ -453,6 +519,7 @@ export default function App() {
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
 
