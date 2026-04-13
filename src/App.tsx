@@ -199,30 +199,30 @@ export default function App() {
     const numPrice = parseFloat(price) || 0;
     const numWeight = parseFloat(weight) || 0;
 
-    if (numPrice <= 0) {
+    if (numPrice <= 0 && numWeight <= 0) {
       setResult(null);
       return;
     }
 
     const currentRate = parseFloat(bankRate) || 0;
-    const rateMarkup = config.rateMarkup.enabled ? config.rateMarkup.value : 0;
+    const rateMarkup = config.rateMarkup.enabled ? (Number(config.rateMarkup.value) || 0) : 0;
     const finalRate = currentRate + rateMarkup;
     
     const pureItemTwd = numPrice * finalRate;
     
-    const domesticFee = config.domesticFee.enabled ? config.domesticFee.value : 0;
+    const domesticFee = config.domesticFee.enabled ? (Number(config.domesticFee.value) || 0) : 0;
     const domesticTwd = domesticFee * finalRate;
 
-    const ccFeeRate = config.ccFee.enabled ? (config.ccFee.value / 100) : 0;
+    const ccFeeRate = config.ccFee.enabled ? ((Number(config.ccFee.value) || 0) / 100) : 0;
     const baseForCcTwd = country === 'KR' ? pureItemTwd : (pureItemTwd + domesticTwd);
     const ccFeeTwd = baseForCcTwd * ccFeeRate;
     
     let shippingTwd = 0;
     if (config.shippingRate.enabled) {
-      shippingTwd = numWeight * config.shippingRate.value;
+      shippingTwd = numWeight * (Number(config.shippingRate.value) || 0);
     }
     
-    const sourcingFeeRate = config.sourcingFee.enabled ? (config.sourcingFee.value / 100) : 0;
+    const sourcingFeeRate = config.sourcingFee.enabled ? ((Number(config.sourcingFee.value) || 0) / 100) : 0;
     const baseForSourcing = country === 'KR' ? numPrice : (numPrice + domesticFee);
     const sourcingFeeLocal = Math.round(baseForSourcing * sourcingFeeRate);
     const sourcingFeeTwd = sourcingFeeLocal * finalRate;
@@ -235,9 +235,9 @@ export default function App() {
     else if (totalCost < 300) profit = 80;
     else profit = Math.max(totalCost * 0.2, 100);
 
-    const pfFee = config.platformFee.enabled ? (config.platformFee.value / 100) : 0;
-    const txFee = config.taxRate.enabled ? (config.taxRate.value / 100) : 0;
-    const mbFee = config.memberBuffer.enabled ? (config.memberBuffer.value / 100) : 0;
+    const pfFee = config.platformFee.enabled ? ((Number(config.platformFee.value) || 0) / 100) : 0;
+    const txFee = config.taxRate.enabled ? ((Number(config.taxRate.value) || 0) / 100) : 0;
+    const mbFee = config.memberBuffer.enabled ? ((Number(config.memberBuffer.value) || 0) / 100) : 0;
     
     const divisorHigh = 1 - (pfFee + txFee + mbFee);
     const divisorLow = 1 - (pfFee + txFee);
@@ -280,7 +280,7 @@ export default function App() {
         buffer: Math.round(bufferAmount)
       }
     });
-  }, [price, weight, bankRate, config]);
+  }, [price, weight, bankRate, config, country]);
 
   const renderConfigGroup = (groupName: 'cost' | 'divisor') => {
     const groupItems = (Object.entries(config) as [keyof Config, ConfigItem][]).filter(([_, item]) => item.group === groupName);
